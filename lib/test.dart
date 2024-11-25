@@ -1,4 +1,5 @@
 // lib/main.dart
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,11 +7,13 @@ import 'package:http/http.dart' as http;
 import 'package:leilao_app/core/helpers/environment_helper.dart';
 import 'package:leilao_app/models/leilao.dart';
 import 'package:leilao_app/models/multicast_action.dart';
-import 'package:mcast_lock/mcast_lock.dart';
+import 'package:leilao_app/models/user.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 import 'package:udp/udp.dart';
 import 'dart:convert';
 import 'dart:typed_data';
+
+import 'package:uuid/uuid.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -50,9 +53,9 @@ class _LoginScreenState extends State<LoginScreen> {
             context,
             MaterialPageRoute(
               builder: (context) => AuctionScreen(
-                userId: _nameController.text,
-                multicastAddress: '230.185.192.108',
-                multicastPort: 4000,
+                userName: _nameController.text,
+                multicastAddress: joinData['multicastAddress'],
+                multicastPort: joinData['multicastPort'],
                 // symmetricKey: base64Decode(joinData['envelope']),
               ),
             ),
@@ -132,14 +135,14 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 class AuctionScreen extends StatefulWidget {
-  final String userId;
+  final String userName;
   final String multicastAddress;
   final int multicastPort;
   // final Uint8List symmetricKey;
 
   const AuctionScreen({
     super.key,
-    required this.userId,
+    required this.userName,
     required this.multicastAddress,
     required this.multicastPort,
     // required this.symmetricKey,
@@ -151,10 +154,15 @@ class AuctionScreen extends StatefulWidget {
 
 class _AuctionScreenState extends State<AuctionScreen> {
   UDP? _multicastSender;
+  UDP? receiver;
   final _bidController = TextEditingController();
+  StreamSubscription? _multicastDataSubscription;
   LeilaoItem? _currentLeilao;
   MDnsClient? client;
   late Endpoint multicastEndpoint;
+  late String userId;
+
+  final formKey = GlobalKey<FormState>();
 
   @override
   void initState() {
@@ -163,20 +171,28 @@ class _AuctionScreenState extends State<AuctionScreen> {
   }
 
   Future<void> _setupMulticast() async {
-    multicastEndpoint = Endpoint.multicast(InternetAddress(widget.multicastAddress));
+    multicastEndpoint = Endpoint.multicast(InternetAddress(widget.multicastAddress), port: const Port(27010));
 
-    var receiver = await UDP.bind(multicastEndpoint);
+    receiver = await UDP.bind(multicastEndpoint);
+    receiver!.socket!.broadcastEnabled = true;
+    receiver!.socket!.multicastHops = 4;
+    receiver!.socket!.multicastLoopback = true;
+    receiver!.socket!.readEventsEnabled = true;
 
-    _multicastSender = await UDP.bind(Endpoint.any());
+    var multicastAddress = InternetAddress(widget.multicastAddress);
+    if (!multicastAddress.isMulticast) {
+      throw ArgumentError('Invalid multicast address: ${widget.multicastAddress}');
+    }
 
-    receiver.asStream().listen((datagram) {
+    _multicastDataSubscription = receiver!.asStream().listen((datagram) {
       if (datagram == null) return;
 
       try {
-        var message = MulticastAction.fromJson(jsonDecode(utf8.decode(datagram.data)));
+        var message = utf8.decode(datagram.data);
 
-        if (message.action == 'AUCTION_STATUS') {
-          final itemLeilaoAtual = message.data as LeilaoItem?;
+        final multicastAction = MulticastAction.fromJson(jsonDecode(message));
+        if (multicastAction.active && multicastAction.action == 'AUCTION_STATUS') {
+          final itemLeilaoAtual = LeilaoItem.fromJson(multicastAction.data);
 
           setState(() => _currentLeilao = itemLeilaoAtual);
         }
@@ -184,44 +200,22 @@ class _AuctionScreenState extends State<AuctionScreen> {
         print('Error processing message: $e');
       }
     });
-    // _multicastSocket = await UDP.bind(Endpoint.multicast(InternetAddress(widget.multicastAddress), port: Port(widget.multicastPort)));
 
-    // var multicastEndpoint = Endpoint.multicast(InternetAddress(widget.multicastAddress), port: Port.any);
-    // _multicastSocket = await UDP.bind(multicastEndpoint);
+    _multicastSender = await UDP.bind(Endpoint.any());
 
-    // _multicastSocket!.socket!.broadcastEnabled = true;
-    // _multicastSocket!.socket!.multicastHops = 4;
-
-    // var remoteEndpoint = InternetAddress(widget.multicastAddress);
-
-    // // _multicastSocket!.socket!.joinMulticast(remoteEndpoint);
-
-    // // Listen for updates
-    // _multicastSocket!.asStream().listen((datagram) {
-    //   if (datagram == null) return;
-
-    //   try {
-    //     var message = utf8.decode(datagram.data);
-
-    //     final itemLeilaoAtual = MulticastAction.fromJson(jsonDecode(message)).data as LeilaoItem?;
-
-    //     setState(() => _currentLeilao = itemLeilaoAtual);
-    //   } catch (e) {
-    //     print('Error processing message: $e');
-    //   }
-    // });
-
-    // await _multicastSocket!.send(
-    //   utf8.encode(
-    //     jsonEncode(
-    //       MulticastAction(
-    //         data: null,
-    //         action: 'JOIN',
-    //       ).toJson(),
-    //     ),
-    //   ),
-    //   Endpoint.multicast(remoteEndpoint, port: Port(widget.multicastPort)),
-    // );
+    userId = const Uuid().v4();
+    var message = jsonEncode(MulticastAction(
+      data: User(
+        id: userId,
+        name: widget.userName,
+      ).toJson(),
+      action: 'JOIN',
+    ).toJson());
+    var messageBytes = utf8.encode(message);
+    await _multicastSender?.send(
+      messageBytes,
+      Endpoint.multicast(InternetAddress(EnvironmentHelper.apiIP), port: const Port(27010)),
+    );
   }
 
   String _decryptMessage(Uint8List encrypted, Uint8List iv) {
@@ -231,21 +225,23 @@ class _AuctionScreenState extends State<AuctionScreen> {
   }
 
   Future<void> _enviarLance() async {
-    // if (_bidController.text.isEmpty) return;
+    if (!formKey.currentState!.validate()) return;
 
-    // final amount = double.tryParse(_bidController.text);
-    // if (amount == null) return;
-    const double amount = 110;
+    final amount = double.tryParse(_bidController.text);
+    if (amount == null) return;
 
     // final encrypted = _encryptMessage(jsonEncode(bid));
-    var message = jsonEncode(MulticastAction(data: amount, action: 'BID').toJson());
+    var message = jsonEncode(MulticastAction(data: {
+      "userId": userId,
+      "amount": amount,
+    }, action: 'BID').toJson());
     var messageBytes = utf8.encode(message);
     await _multicastSender?.send(
       messageBytes,
-      Endpoint.multicast(InternetAddress('127.0.0.1'), port: Port(27010)),
+      Endpoint.multicast(InternetAddress(EnvironmentHelper.apiIP), port: const Port(27010)),
     );
 
-    _bidController.clear();
+    formKey.currentState!.reset();
   }
 
   Uint8List _encryptMessage(String message) {
@@ -256,7 +252,9 @@ class _AuctionScreenState extends State<AuctionScreen> {
 
   @override
   void dispose() {
+    _multicastDataSubscription?.cancel();
     _multicastSender?.close();
+    receiver?.close();
     _bidController.dispose();
     super.dispose();
   }
@@ -265,45 +263,56 @@ class _AuctionScreenState extends State<AuctionScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Leilão')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (_currentLeilao != null) ...[
-              Text('Item: ${_currentLeilao!.nome}'),
-              Text('Lance inicial: R\$ ${_currentLeilao!.lanceInicial}'),
-              Text('Lance atual: R\$ ${_currentLeilao!.lanceAtual}'),
-              Text('Incremento mínimo: R\$ ${_currentLeilao!.incrementoMinimoLance}'),
-              Text('Tempo restante: ${_currentLeilao!.endTime.difference(DateTime.now()).inSeconds} segundos'),
+      body: Form(
+        key: formKey,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (_currentLeilao != null) ...[
+                Text('Item: ${_currentLeilao!.nome}'),
+                Text('Lance inicial: R\$ ${_currentLeilao!.lanceInicial}'),
+                Text('Lance atual: R\$ ${_currentLeilao!.lanceAtual}'),
+                Text('Incremento mínimo: R\$ ${_currentLeilao!.incrementoMinimoLance}'),
+                Text('Ofertante atual: ${_currentLeilao!.ofertanteAtual?.name}'),
+                Text('Tempo restante: ${_currentLeilao!.endTime.difference(DateTime.now()).inMinutes} minutos'),
+              ],
+              const SizedBox(
+                height: 20,
+              ),
+              TextFormField(
+                controller: _bidController,
+                autovalidateMode: AutovalidateMode.onUserInteraction,
+                decoration: const InputDecoration(labelText: 'Lance'),
+                keyboardType: TextInputType.number,
+                validator: (value) {
+                  if (value == null || value.isEmpty || double.tryParse(value) == null) {
+                    return 'Por favor, insira um valor';
+                  }
+                  var valorLeilaoAtual = _currentLeilao?.lanceAtual ?? _currentLeilao?.lanceInicial ?? 0;
+                  if (_currentLeilao != null && double.parse(value) <= valorLeilaoAtual) {
+                    return 'Lance deve ser maior que o atual';
+                  }
+                  if (_currentLeilao != null && num.parse(value) < valorLeilaoAtual + _currentLeilao!.incrementoMinimoLance) {
+                    return 'Lance deve seguir o incremento mínimo';
+                  }
+                  if(_currentLeilao?.ofertanteAtual?.id == userId) {
+                    return 'Você já é o maior lance';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(
+                height: 20,
+              ),
+              ElevatedButton(
+                onPressed: _enviarLance,
+                child: const Text('Enviar lance'),
+              ),
             ],
-            const SizedBox(
-              height: 20,
-            ),
-            TextFormField(
-              controller: _bidController,
-              decoration: const InputDecoration(labelText: 'Lance'),
-              keyboardType: TextInputType.number,
-              validator: (value) {
-                if (value == null || value.isEmpty || double.tryParse(value) == null) {
-                  return 'Por favor, insira um valor';
-                }
-                var valorLeilaoAtual = _currentLeilao?.lanceAtual ?? _currentLeilao?.lanceInicial ?? 0;
-                if (_currentLeilao != null && double.parse(value) <= valorLeilaoAtual) {
-                  return 'Lance deve ser maior que o atual';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(
-              height: 20,
-            ),
-            ElevatedButton(
-              onPressed: _enviarLance,
-              child: const Text('Enviar lance'),
-            ),
-          ],
+          ),
         ),
       ),
     );

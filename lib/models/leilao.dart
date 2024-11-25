@@ -3,9 +3,9 @@ import 'package:leilao_app/models/user.dart';
 class LeilaoItem {
   final String id;
   final String nome;
-  final double lanceInicial;
-  final double incrementoMinimoLance;
-  double? lanceAtual;
+  final num lanceInicial;
+  final num incrementoMinimoLance;
+  num? lanceAtual;
   User? ofertanteAtual;
   final DateTime endTime;
 
