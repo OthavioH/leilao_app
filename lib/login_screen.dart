@@ -37,7 +37,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // Registrar usuário
       final response = await http.post(
-        Uri.parse('${EnvironmentHelper.apiUrl}/join'),
+        Uri.parse('https://${EnvironmentHelper.apiIP}/join'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'name': _nameController.text,
@@ -125,7 +125,18 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: _isLoading ? null : joinLeilao,
-              child: _isLoading ? const CircularProgressIndicator() : const Text('Entrar'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)
+              ),
+              child: _isLoading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1,
+                      ),
+                    )
+                  : const Text('Entrar'),
             ),
           ],
         ),
@@ -234,7 +245,8 @@ class _AuctionScreenState extends State<AuctionScreen> {
     var message = jsonEncode(MulticastAction(data: {
       "userId": userId,
       "amount": amount,
-    }, action: 'BID').toJson());
+    }, action: 'BID')
+        .toJson());
     var messageBytes = utf8.encode(message);
     await _multicastSender?.send(
       messageBytes,
@@ -298,7 +310,7 @@ class _AuctionScreenState extends State<AuctionScreen> {
                   if (_currentLeilao != null && num.parse(value) < valorLeilaoAtual + _currentLeilao!.incrementoMinimoLance) {
                     return 'Lance deve seguir o incremento mínimo';
                   }
-                  if(_currentLeilao?.ofertanteAtual?.id == userId) {
+                  if (_currentLeilao?.ofertanteAtual?.id == userId) {
                     return 'Você já é o maior lance';
                   }
                   return null;

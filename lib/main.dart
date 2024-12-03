@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:leilao_app/test.dart';
+import 'package:leilao_app/login_screen.dart';
 
 void logNetworkInterfaces() {
   NetworkInterface.list().then((interfaces) {
