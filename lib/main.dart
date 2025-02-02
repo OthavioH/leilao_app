@@ -1,3 +1,4 @@
+import 'dart:developer';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,9 +8,9 @@ import 'package:leilao_app/login_screen.dart';
 void logNetworkInterfaces() {
   NetworkInterface.list().then((interfaces) {
     for (var interface in interfaces) {
-      print('Interface: ${interface.name}');
+      log('Interface: ${interface.name}');
       for (var address in interface.addresses) {
-        print('  Address: ${address.address}');
+        log('  Address: ${address.address}');
       }
     }
   });
