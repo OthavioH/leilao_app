@@ -1,5 +1,6 @@
 // lib/main.dart
 import 'dart:async';
+import 'dart:developer';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -29,7 +30,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // Registrar usuário
       final response = await http.post(
-        Uri.parse('http://${EnvironmentHelper.apiIP}:3000/join'),
+        Uri.parse('${EnvironmentHelper.apiUrl}/join'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'name': _nameController.text,
@@ -90,7 +91,8 @@ class _LoginScreenState extends State<LoginScreen> {
       //     }
       //   }
       // }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      log(e.toString(), stackTrace: stackTrace);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );

@@ -15,7 +15,6 @@ void logNetworkInterfaces() {
   });
 }
 
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   logNetworkInterfaces();
@@ -30,8 +29,11 @@ class AuctionApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Auction Client',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
+      theme: ThemeData.from(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.lightBlue,
+          brightness: Brightness.dark,
+        ),
       ),
       home: const LoginScreen(),
     );

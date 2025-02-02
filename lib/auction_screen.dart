@@ -1,5 +1,6 @@
 // lib/main.dart
 import 'dart:async';
+import 'dart:developer';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -47,55 +48,60 @@ class _AuctionScreenState extends State<AuctionScreen> {
   @override
   void initState() {
     super.initState();
+    userId = const Uuid().v4();
     _setupMulticast();
   }
 
   Future<void> _setupMulticast() async {
-    multicastEndpoint = Endpoint.multicast(InternetAddress(widget.multicastAddress), port: const Port(27010));
+    try {
+      final multicastEndpoint = Endpoint.multicast(
+        InternetAddress('239.255.255.250'),
+        port: Port(widget.multicastPort),
+      );
 
-    receiver = await UDP.bind(multicastEndpoint);
-    receiver!.socket!.broadcastEnabled = true;
-    receiver!.socket!.multicastHops = 4;
-    receiver!.socket!.multicastLoopback = true;
-    receiver!.socket!.readEventsEnabled = true;
+      receiver = await UDP.bind(multicastEndpoint);
 
-    var multicastAddress = InternetAddress(widget.multicastAddress);
-    if (!multicastAddress.isMulticast) {
-      throw ArgumentError('Invalid multicast address: ${widget.multicastAddress}');
-    }
+      receiver!.socket!.broadcastEnabled = true;
+      receiver!.socket!.multicastHops = 4;
+      receiver!.socket!.multicastLoopback = true;
+      receiver!.socket!.readEventsEnabled = true;
 
-    _multicastDataSubscription = receiver!.asStream().listen((datagram) {
-      if (datagram == null) return;
+      _multicastDataSubscription = receiver!.asStream().listen((datagram) {
+        if (datagram == null) return;
 
-      try {
-        var message = utf8.decode(datagram.data);
+        try {
+          var message = utf8.decode(datagram.data);
 
-        final multicastAction = MulticastAction.fromJson(jsonDecode(message));
-        if (multicastAction.active && multicastAction.action == 'AUCTION_STATUS') {
-          final itemLeilaoAtual = Leilao.fromJson(multicastAction.data['leilao']);
+          final multicastAction = MulticastAction.fromJson(jsonDecode(message));
+          if (multicastAction.active && multicastAction.action == 'AUCTION_STATUS') {
+            final itemLeilaoAtual = Leilao.fromJson(multicastAction.data);
 
-          setState(() => _currentLeilao = itemLeilaoAtual);
+            setState(() => _currentLeilao = itemLeilaoAtual);
+          }
+        } catch (e, stackTrace) {
+          log('Error processing message: $e', stackTrace: stackTrace);
         }
-      } catch (e) {
-        print('Error processing message: $e');
-      }
-    });
+      });
 
-    _multicastSender = await UDP.bind(Endpoint.any());
+      _multicastSender = await UDP.bind(Endpoint.any(port: const Port(0)));
+      _multicastSender!.socket!.broadcastEnabled = true;
+      _multicastSender!.socket!.multicastHops = 128;
 
-    userId = const Uuid().v4();
-    var message = jsonEncode(MulticastAction(
-      data: User(
-        id: userId,
-        name: widget.userName,
-      ).toJson(),
-      action: 'JOIN',
-    ).toJson());
-    var messageBytes = utf8.encode(message);
-    await _multicastSender?.send(
-      messageBytes,
-      Endpoint.multicast(InternetAddress(EnvironmentHelper.apiIP), port: const Port(27010)),
-    );
+      var message = jsonEncode(MulticastAction(
+        data: User(
+          id: userId,
+          name: widget.userName,
+        ).toJson(),
+        action: 'JOIN',
+      ).toJson());
+
+      var messageBytes = utf8.encode(message);
+
+      await _multicastSender?.send(messageBytes, multicastEndpoint);
+      _multicastSender?.close();
+    } catch (e, stackTrace) {
+      log('Error setting up multicast: $e', stackTrace: stackTrace);
+    }
   }
 
   String _decryptMessage(Uint8List encrypted, Uint8List iv) {
@@ -117,9 +123,16 @@ class _AuctionScreenState extends State<AuctionScreen> {
     }, action: 'BID')
         .toJson());
     var messageBytes = utf8.encode(message);
+
+    _multicastSender = await UDP.bind(Endpoint.any(port: const Port(0)));
+    _multicastSender!.socket!.broadcastEnabled = true;
+    _multicastSender!.socket!.multicastHops = 128;
     await _multicastSender?.send(
       messageBytes,
-      Endpoint.multicast(InternetAddress(EnvironmentHelper.apiIP), port: const Port(27010)),
+      Endpoint.multicast(
+        InternetAddress(widget.multicastAddress),
+        port: Port(widget.multicastPort),
+      ),
     );
 
     formKey.currentState!.reset();
@@ -144,7 +157,7 @@ class _AuctionScreenState extends State<AuctionScreen> {
     _multicastSender
         ?.send(
       messageBytes,
-      Endpoint.multicast(InternetAddress(EnvironmentHelper.apiIP), port: const Port(27010)),
+      Endpoint.multicast(InternetAddress(widget.multicastAddress), port: Port(widget.multicastPort)),
     )
         .whenComplete(() {
       _multicastSender?.close();
@@ -175,6 +188,7 @@ class _AuctionScreenState extends State<AuctionScreen> {
                     width: 100,
                     height: 100,
                     fit: BoxFit.fill,
+                    errorBuilder: (context, error, stackTrace) => const Icon(Icons.error),
                   ),
                 ),
                 Text('Item: ${_currentLeilao!.item.nome}'),
@@ -184,15 +198,19 @@ class _AuctionScreenState extends State<AuctionScreen> {
                 Text('Ofertante atual: ${_currentLeilao!.ofertanteAtual?.name}'),
                 Text('Tempo restante: ${_currentLeilao!.endTime.difference(DateTime.now()).inMinutes} minutos'),
               ],
-              const SizedBox(
-                height: 20,
-              ),
+              if (_currentLeilao != null)
+                const SizedBox(
+                  height: 20,
+                ),
               TextFormField(
                 controller: _bidController,
                 autovalidateMode: AutovalidateMode.onUserInteraction,
                 decoration: const InputDecoration(labelText: 'Lance'),
                 keyboardType: TextInputType.number,
                 validator: (value) {
+                  if (_currentLeilao?.ofertanteAtual?.id == userId) {
+                    return 'Você já tem o maior lance';
+                  }
                   if (value == null || value.isEmpty || double.tryParse(value) == null) {
                     return 'Por favor, insira um valor';
                   }
@@ -204,7 +222,7 @@ class _AuctionScreenState extends State<AuctionScreen> {
                     return 'Lance deve seguir o incremento mínimo';
                   }
                   if (_currentLeilao?.ofertanteAtual?.id == userId) {
-                    return 'Você já é o maior lance';
+                    return 'Você já tem o maior lance';
                   }
                   return null;
                 },
