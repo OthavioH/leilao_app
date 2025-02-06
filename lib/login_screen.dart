@@ -17,6 +17,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _nameController = TextEditingController();
+  final _serverIPController = TextEditingController(text: EnvironmentHelper.apiUrl);
   bool _isLoading = false;
 
   Future<void> joinLeilao() async {
@@ -113,6 +114,11 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            TextField(
+              controller: _serverIPController,
+              decoration: const InputDecoration(labelText: 'IP do Servidor'),
+            ),
+            const SizedBox(height: 16,),
             TextField(
               controller: _nameController,
               decoration: const InputDecoration(labelText: 'Nome'),

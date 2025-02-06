@@ -56,7 +56,7 @@ class _AuctionScreenState extends State<AuctionScreen> {
 
   Future<void> _setupMulticast() async {
     try {
-      final multicastEndpoint = Endpoint.any(port: const Port(0));
+      final multicastEndpoint = Endpoint.multicast(InternetAddress(widget.multicastAddress), port: Port(widget.multicastPort));
 
       receiver = await UDP.bind(multicastEndpoint);
 
