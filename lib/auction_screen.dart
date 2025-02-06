@@ -4,6 +4,7 @@ import 'dart:developer';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:leilao_app/models/leilao.dart';
 import 'package:leilao_app/models/multicast_action.dart';
 import 'package:leilao_app/models/user.dart';
@@ -43,6 +44,9 @@ class _AuctionScreenState extends State<AuctionScreen> {
 
   final formKey = GlobalKey<FormState>();
 
+  Timer? _timer;
+  Duration? tempoRestanteParaNovaOferta;
+
   @override
   void initState() {
     super.initState();
@@ -53,7 +57,7 @@ class _AuctionScreenState extends State<AuctionScreen> {
   Future<void> _setupMulticast() async {
     try {
       final multicastEndpoint = Endpoint.multicast(
-        InternetAddress('239.255.255.250'),
+        InternetAddress(widget.multicastAddress),
         port: Port(widget.multicastPort),
       );
 
@@ -74,7 +78,59 @@ class _AuctionScreenState extends State<AuctionScreen> {
           if (multicastAction.active && multicastAction.action == 'AUCTION_STATUS') {
             final itemLeilaoAtual = Leilao.fromJson(multicastAction.data['leilao']);
 
-            setState(() => _currentLeilao = itemLeilaoAtual);
+            _timer?.cancel();
+
+            if (_currentLeilao != null &&
+                itemLeilaoAtual.ofertanteAtual?.id != _currentLeilao?.ofertanteAtual?.id &&
+                itemLeilaoAtual.lanceAtual != _currentLeilao?.lanceAtual) {
+              Timer.periodic(const Duration(seconds: 1), (timer) {
+                if (_currentLeilao?.ofertanteAtual?.id != userId && (_currentLeilao!.lanceAtual ?? 0) > (itemLeilaoAtual.lanceAtual ?? 0)) {
+                  timer.cancel();
+                  return;
+                }
+                tempoRestanteParaNovaOferta ??= const Duration(seconds: 6);
+                if (mounted) {
+                  setState(() {
+                    tempoRestanteParaNovaOferta = tempoRestanteParaNovaOferta! - const Duration(seconds: 1);
+                  });
+                }
+              });
+            }
+            setState(() {
+              _currentLeilao = itemLeilaoAtual;
+              tempoRestante = itemLeilaoAtual.endTime.difference(DateTime.now());
+              tempoRestante = tempoRestante.isNegative ? Duration.zero : tempoRestante;
+              _timer = null;
+              // init timer based on itemLeilaoAtual.endTime to update the remaining time on screen
+              _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+                if (tempoRestante.inSeconds <= 0) {
+                  timer.cancel();
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog.adaptive(
+                      title: const Text('O Leilão acabou!'),
+                      content: Text('O leilão foi finalizado e o vencedor foi ${itemLeilaoAtual.ofertanteAtual?.name ?? 'Nenhum'}'),
+                      actions: [
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            Navigator.pop(context);
+                          },
+                          child: const Text('OK'),
+                        ),
+                      ],
+                    ),
+                  );
+                } else {
+                  if (mounted) {
+                    setState(() {
+                      final now = DateTime.now();
+                      tempoRestante = itemLeilaoAtual.endTime.difference(now);
+                    });
+                  }
+                }
+              });
+            });
           }
         } catch (e, stackTrace) {
           log('Error processing message: $e', stackTrace: stackTrace);
@@ -142,6 +198,8 @@ class _AuctionScreenState extends State<AuctionScreen> {
   //   return Uint8List(0); // Implementar encriptação real
   // }
 
+  Duration tempoRestante = Duration.zero;
+
   @override
   void dispose() async {
     var message = jsonEncode(MulticastAction(
@@ -204,41 +262,64 @@ class _AuctionScreenState extends State<AuctionScreen> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  Text('Lance inicial: R\$ ${_currentLeilao!.lanceInicial}'),
-                  Text('Lance atual: R\$ ${_currentLeilao!.lanceAtual ?? '0'}'),
-                  Text('Lance mínimo: R\$ ${_currentLeilao!.incrementoMinimoLance}'),
-                  Text('Ofertante atual: ${_currentLeilao!.ofertanteAtual?.name ?? 'Nenhum'}'),
-                  Text('Tempo restante: ${_currentLeilao!.endTime.difference(DateTime.now()).inMinutes} minutos'),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    runAlignment: WrapAlignment.spaceEvenly,
+                    alignment: WrapAlignment.spaceEvenly,
+                    runSpacing: 8,
+                    spacing: 16,
+                    children: [
+                      InfoCard(title: 'Lance inicial', data: 'R\$ ${_currentLeilao!.lanceInicial}'),
+                      if (_currentLeilao!.lanceAtual != null) InfoCard(title: 'Lance atual', data: 'R\$ ${_currentLeilao!.lanceAtual}'),
+                      InfoCard(title: 'Tempo restante', data: '${tempoRestante.inMinutes}:${tempoRestante.inSeconds.remainder(60).toString().padLeft(2, '0')}'),
+                      InfoCard(
+                          title: 'Lance mínimo',
+                          data: 'R\$ ${_currentLeilao!.incrementoMinimoLance + (_currentLeilao!.lanceAtual ?? _currentLeilao!.lanceInicial)}'),
+                      InfoCard(title: 'Ofertante atual', data: _currentLeilao!.ofertanteAtual?.name ?? 'Nenhum'),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Builder(builder: (context) {
+                    if (tempoRestanteParaNovaOferta == null || tempoRestanteParaNovaOferta!.inSeconds <= 0) {
+                      return const SizedBox.shrink();
+                    }
+
+                    return Text('Contagem regressiva para nova oferta: ${tempoRestanteParaNovaOferta!.inSeconds}');
+                  }),
                 ],
                 if (_currentLeilao != null)
                   const SizedBox(
                     height: 20,
                   ),
-                TextFormField(
-                  controller: _bidController,
-                  autovalidateMode: AutovalidateMode.onUserInteraction,
-                  decoration: const InputDecoration(labelText: 'Lance'),
-                  keyboardType: TextInputType.number,
-                  onTapOutside: (_) => FocusScope.of(context).unfocus(),
-                  validator: (value) {
-                    if (_currentLeilao?.ofertanteAtual?.id == userId) {
-                      return 'Você já tem o maior lance';
-                    }
-                    if (value == null || value.isEmpty || double.tryParse(value) == null) {
-                      return 'Por favor, insira um valor';
-                    }
-                    var valorLeilaoAtual = _currentLeilao?.lanceAtual ?? _currentLeilao?.lanceInicial ?? 0;
-                    if (_currentLeilao != null && double.parse(value) <= valorLeilaoAtual) {
-                      return 'Lance deve ser maior que o atual';
-                    }
-                    if (_currentLeilao != null && num.parse(value) < valorLeilaoAtual + _currentLeilao!.incrementoMinimoLance) {
-                      return 'Lance deve seguir o incremento mínimo';
-                    }
-                    if (_currentLeilao?.ofertanteAtual?.id == userId) {
-                      return 'Você já tem o maior lance';
-                    }
-                    return null;
-                  },
+                SizedBox(
+                  width: MediaQuery.sizeOf(context).width * 0.3,
+                  child: TextFormField(
+                    controller: _bidController,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                    decoration: const InputDecoration(labelText: 'Lance'),
+                    keyboardType: TextInputType.number,
+                    onTapOutside: (_) => FocusScope.of(context).unfocus(),
+                    validator: (value) {
+                      if (_currentLeilao?.ofertanteAtual?.id == userId) {
+                        return 'Você já tem o maior lance';
+                      }
+                      if (value == null || value.isEmpty || num.tryParse(value) == null) {
+                        return 'Por favor, insira um valor';
+                      }
+                      var valorLeilaoAtual = _currentLeilao?.lanceAtual ?? _currentLeilao?.lanceInicial ?? 0;
+                      if (_currentLeilao != null && num.parse(value) <= valorLeilaoAtual) {
+                        return 'Lance deve ser maior que o atual';
+                      }
+                      if (_currentLeilao != null && num.parse(value) < valorLeilaoAtual + _currentLeilao!.incrementoMinimoLance) {
+                        return 'Lance deve seguir o incremento mínimo';
+                      }
+                      if (_currentLeilao?.ofertanteAtual?.id == userId) {
+                        return 'Você já tem o maior lance';
+                      }
+                      return null;
+                    },
+                  ),
                 ),
                 const SizedBox(
                   height: 20,
@@ -248,20 +329,40 @@ class _AuctionScreenState extends State<AuctionScreen> {
                   child: const Text('Enviar lance'),
                 ),
                 const SizedBox(height: 20),
-                ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: _currentLeilao?.users.length ?? 0,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemBuilder: (context, index) {
-                    var nome = _currentLeilao?.users.elementAt(index).name ?? '';
-                    return Text(
-                      nome,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    );
-                  },
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Usuários:',
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: SizedBox(
+                    height: 60,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _currentLeilao?.users.length ?? 0,
+                      itemBuilder: (context, index) {
+                        var nome = _currentLeilao?.users.elementAt(index).name ?? '';
+                        return Card(
+                          color: Theme.of(context).colorScheme.onPrimary,
+                          child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Text(
+                              nome,
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
                 ),
                 // GridView.builder(
                 //   shrinkWrap: true,
@@ -287,4 +388,34 @@ class _AuctionScreenState extends State<AuctionScreen> {
       ),
     );
   }
+}
+
+class InfoCard extends StatelessWidget {
+  final String title;
+  final String data;
+  const InfoCard({
+    required this.title,
+    required this.data,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(title),
+          const SizedBox(height: 4),
+          Card(
+            color: Theme.of(context).colorScheme.primaryContainer,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Text(
+                data,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+            ),
+          ),
+        ],
+      );
 }
