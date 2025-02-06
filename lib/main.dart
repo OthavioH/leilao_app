@@ -1,11 +1,13 @@
 import 'dart:developer';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:leilao_app/login_screen.dart';
 
 void logNetworkInterfaces() {
+  if(kIsWeb) return;
   NetworkInterface.list().then((interfaces) {
     for (var interface in interfaces) {
       log('Interface: ${interface.name}');

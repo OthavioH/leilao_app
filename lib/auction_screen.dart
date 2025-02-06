@@ -56,10 +56,7 @@ class _AuctionScreenState extends State<AuctionScreen> {
 
   Future<void> _setupMulticast() async {
     try {
-      final multicastEndpoint = Endpoint.multicast(
-        InternetAddress(widget.multicastAddress),
-        port: Port(widget.multicastPort),
-      );
+      final multicastEndpoint = Endpoint.any(port: const Port(0));
 
       receiver = await UDP.bind(multicastEndpoint);
 
@@ -261,6 +258,7 @@ class _AuctionScreenState extends State<AuctionScreen> {
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
                     ),
+                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
                   Wrap(
@@ -341,26 +339,20 @@ class _AuctionScreenState extends State<AuctionScreen> {
                   alignment: Alignment.centerLeft,
                   child: SizedBox(
                     height: 60,
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _currentLeilao?.users.length ?? 0,
-                      itemBuilder: (context, index) {
-                        var nome = _currentLeilao?.users.elementAt(index).name ?? '';
-                        return Card(
-                          color: Theme.of(context).colorScheme.onPrimary,
-                          child: Padding(
-                            padding: const EdgeInsets.all(8),
-                            child: Text(
-                              nome,
-                              style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _currentLeilao?.users.map((user) {
+                        return Chip(
+                          label: Text(user.name),
+                          labelStyle: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
                           ),
+                          padding: const EdgeInsets.all(8),
                         );
-                      },
+                      }).toList() ??
+                          [],
                     ),
                   ),
                 ),
