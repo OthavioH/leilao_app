@@ -4,20 +4,19 @@ import 'dart:developer';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
 import 'package:leilao_app/models/leilao.dart';
 import 'package:leilao_app/models/multicast_action.dart';
 import 'package:leilao_app/models/user.dart';
+import 'package:leilao_app/services/encryption_service.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 import 'package:udp/udp.dart';
 import 'dart:convert';
-
-import 'package:uuid/uuid.dart';
 
 class AuctionScreen extends StatefulWidget {
   final String userName;
   final String multicastAddress;
   final int multicastPort;
+  final String symmetricKey;
   // final Uint8List symmetricKey;
 
   const AuctionScreen({
@@ -25,7 +24,7 @@ class AuctionScreen extends StatefulWidget {
     required this.userName,
     required this.multicastAddress,
     required this.multicastPort,
-    // required this.symmetricKey,
+    required this.symmetricKey,
   });
 
   @override
@@ -50,7 +49,7 @@ class _AuctionScreenState extends State<AuctionScreen> {
   @override
   void initState() {
     super.initState();
-    userId = const Uuid().v4();
+    userId = userId;
     _setupMulticast();
   }
 
@@ -71,7 +70,9 @@ class _AuctionScreenState extends State<AuctionScreen> {
         try {
           var message = utf8.decode(datagram.data);
 
-          final multicastAction = MulticastAction.fromJson(jsonDecode(message));
+          var decryptedMessage = EncryptionService.decryptWithSymmetricKey(message, widget.symmetricKey);
+
+          final multicastAction = MulticastAction.fromJson(jsonDecode(decryptedMessage));
           if (multicastAction.active && multicastAction.action == 'AUCTION_STATUS') {
             final itemLeilaoAtual = Leilao.fromJson(multicastAction.data['leilao']);
 
@@ -106,7 +107,7 @@ class _AuctionScreenState extends State<AuctionScreen> {
                     context: context,
                     builder: (context) => AlertDialog.adaptive(
                       title: const Text('O Leilão acabou!'),
-                      content: Text('O leilão foi finalizado e o vencedor foi ${itemLeilaoAtual.ofertanteAtual?.name ?? 'Nenhum'}'),
+                      content: Text('O leilão foi finalizado e o vencedor foi ${itemLeilaoAtual.ofertanteAtual?.id ?? 'Nenhum'}'),
                       actions: [
                         TextButton(
                           onPressed: () {
@@ -131,6 +132,9 @@ class _AuctionScreenState extends State<AuctionScreen> {
           }
         } catch (e, stackTrace) {
           log('Error processing message: $e', stackTrace: stackTrace);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e')),
+          );
         }
       });
 
@@ -141,12 +145,13 @@ class _AuctionScreenState extends State<AuctionScreen> {
       var message = jsonEncode(MulticastAction(
         data: User(
           id: userId,
-          name: widget.userName,
         ).toJson(),
         action: 'JOIN',
       ).toJson());
 
-      var messageBytes = utf8.encode(message);
+      var encryptedMessage = EncryptionService.encryptWithSymmetricKey(message, widget.symmetricKey);
+
+      var messageBytes = utf8.encode(encryptedMessage);
 
       await _multicastSender?.send(messageBytes, multicastEndpoint);
       _multicastSender?.close();
@@ -173,7 +178,9 @@ class _AuctionScreenState extends State<AuctionScreen> {
       "amount": amount,
     }, action: 'BID')
         .toJson());
-    var messageBytes = utf8.encode(message);
+    var encryptedMessage = EncryptionService.encryptWithSymmetricKey(message, widget.symmetricKey);
+
+    var messageBytes = utf8.encode(encryptedMessage);
 
     _multicastSender = await UDP.bind(Endpoint.any(port: const Port(0)));
     _multicastSender!.socket!.broadcastEnabled = true;
@@ -189,12 +196,6 @@ class _AuctionScreenState extends State<AuctionScreen> {
     formKey.currentState!.reset();
   }
 
-  // Uint8List _encryptMessage(String message) {
-  //   // Implementação da encriptação AES
-  //   // Usar uma biblioteca como 'encrypt' para implementar
-  //   return Uint8List(0); // Implementar encriptação real
-  // }
-
   Duration tempoRestante = Duration.zero;
 
   @override
@@ -202,11 +203,12 @@ class _AuctionScreenState extends State<AuctionScreen> {
     var message = jsonEncode(MulticastAction(
       data: User(
         id: userId,
-        name: widget.userName,
       ).toJson(),
       action: 'LEAVE',
     ).toJson());
-    var messageBytes = utf8.encode(message);
+    var encryptedMessage = EncryptionService.encryptWithSymmetricKey(message, widget.symmetricKey);
+
+    var messageBytes = utf8.encode(encryptedMessage);
     UDP.bind(Endpoint.any(port: const Port(0))).then((sender) {
       sender.socket?.broadcastEnabled = true;
       sender.socket?.multicastHops = 128;
@@ -274,7 +276,7 @@ class _AuctionScreenState extends State<AuctionScreen> {
                       InfoCard(
                           title: 'Lance mínimo',
                           data: 'R\$ ${_currentLeilao!.incrementoMinimoLance + (_currentLeilao!.lanceAtual ?? _currentLeilao!.lanceInicial)}'),
-                      InfoCard(title: 'Ofertante atual', data: _currentLeilao!.ofertanteAtual?.name ?? 'Nenhum'),
+                      InfoCard(title: 'Ofertante atual', data: _currentLeilao!.ofertanteAtual?.id ?? 'Nenhum'),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -343,15 +345,15 @@ class _AuctionScreenState extends State<AuctionScreen> {
                       spacing: 8,
                       runSpacing: 8,
                       children: _currentLeilao?.users.map((user) {
-                        return Chip(
-                          label: Text(user.name),
-                          labelStyle: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          padding: const EdgeInsets.all(8),
-                        );
-                      }).toList() ??
+                            return Chip(
+                              label: Text(user.id),
+                              labelStyle: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              padding: const EdgeInsets.all(8),
+                            );
+                          }).toList() ??
                           [],
                     ),
                   ),

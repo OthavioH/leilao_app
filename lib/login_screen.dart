@@ -8,6 +8,9 @@ import 'package:leilao_app/auction_screen.dart';
 import 'package:leilao_app/core/helpers/environment_helper.dart';
 import 'dart:convert';
 
+import 'package:leilao_app/core/helpers/rsa_helper.dart';
+import 'package:leilao_app/services/encryption_service.dart';
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -24,23 +27,26 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Gerar par de chaves
-      // final keyPair = await Ed25519().newKeyPair();
-      // final publicKey = await keyPair.extractPublicKey();
-      // final publicKeyBytes = publicKey.bytes;
 
       // Registrar usuário
+      final serverIp = _serverIPController.text;
+      EnvironmentHelper.apiUrl = serverIp;
+      var message = "join-auction";
+      var privateKey = RSAHelper.parsePrivateKeyFromPEM(EnvironmentHelper.privateKey);
+      var signature = EncryptionService.encryptWithPrivateKey(message, privateKey);
       final response = await http.post(
-        Uri.parse('${EnvironmentHelper.apiUrl}/join'),
+        Uri.parse('$serverIp/join'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'name': _nameController.text,
-          // 'publicKey': base64Encode(publicKeyBytes),
+          'user_id': _nameController.text,
+          'message': signature,
         }),
       );
 
       if (response.statusCode == 200) {
         final joinData = jsonDecode(response.body);
+
+        var decryptedSymmetricKey = EncryptionService.decryptWithPrivateKey(joinData['envelope'], privateKey);
 
         if (mounted) {
           Navigator.push(
@@ -50,48 +56,12 @@ class _LoginScreenState extends State<LoginScreen> {
                 userName: _nameController.text,
                 multicastAddress: joinData['multicastAddress'],
                 multicastPort: joinData['multicastPort'],
-                // symmetricKey: base64Decode(joinData['envelope']),
+                symmetricKey: decryptedSymmetricKey,
               ),
             ),
           );
         }
       }
-
-      // if (response.statusCode == 200) {
-      //   final userId = jsonDecode(response.body)['userId'];
-
-      //   // Gerar assinatura para join
-      //   final message = Uint8List.fromList('join-auction'.codeUnits);
-      //   final signature = await keyPair.sign(message);
-
-      //   // Join no leilão
-      //   final joinResponse = await http.post(
-      //     Uri.parse('http://localhost:3000/join'),
-      //     headers: {'Content-Type': 'application/json'},
-      //     body: jsonEncode({
-      //       'userId': userId,
-      //       'signature': base64Encode(signature.bytes),
-      //     }),
-      //   );
-
-      //   if (joinResponse.statusCode == 200) {
-      //     final joinData = jsonDecode(joinResponse.body);
-
-      //     if (mounted) {
-      //       Navigator.pushReplacement(
-      //         context,
-      //         MaterialPageRoute(
-      //           builder: (context) => AuctionScreen(
-      //             userId: userId,
-      //             multicastAddress: joinData['multicastAddress'],
-      //             multicastPort: joinData['multicastPort'],
-      //             symmetricKey: base64Decode(joinData['envelope']),
-      //           ),
-      //         ),
-      //       );
-      //     }
-      //   }
-      // }
     } catch (e, stackTrace) {
       log(e.toString(), stackTrace: stackTrace);
       // ignore: use_build_context_synchronously
