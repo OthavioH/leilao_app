@@ -1,12 +1,15 @@
 import 'package:encrypt/encrypt.dart';
+import 'package:leilao_app/core/helpers/rsa_helper.dart';
 import 'package:pointycastle/asymmetric/api.dart';
 
 class EncryptionService {
-  static String encryptWithPrivateKey(String text, RSAPrivateKey privateKey) {
-    final encrypter = Encrypter(RSA(privateKey: privateKey));
-    final encrypted = encrypter.encrypt(text);
+  static String signWithPrivateKey(String text, String privateKeyBase64) {
+   //Generate a digital signature
+    final privateKey = RSAHelper.parsePrivateKeyFromPEM(privateKeyBase64);
+    final signer = Signer(RSASigner(RSASignDigest.SHA256, privateKey: privateKey));
+    final signature = signer.sign(text);
 
-    return encrypted.base64;
+    return signature.base64;
   }
   
   static String decryptWithPrivateKey(String text, RSAPrivateKey privateKey) {

@@ -27,26 +27,28 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-
       // Registrar usuário
       final serverIp = _serverIPController.text;
       EnvironmentHelper.apiUrl = serverIp;
       var message = "join-auction";
-      var privateKey = RSAHelper.parsePrivateKeyFromPEM(EnvironmentHelper.privateKey);
-      var signature = EncryptionService.encryptWithPrivateKey(message, privateKey);
+      var privateKey = EnvironmentHelper.privateKey;
+      var signature = EncryptionService.signWithPrivateKey(message, privateKey);
       final response = await http.post(
         Uri.parse('$serverIp/join'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'user_id': _nameController.text,
-          'message': signature,
+          'signature': signature,
         }),
       );
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 201) {
         final joinData = jsonDecode(response.body);
 
-        var decryptedSymmetricKey = EncryptionService.decryptWithPrivateKey(joinData['envelope'], privateKey);
+        var decryptedSymmetricKey = EncryptionService.decryptWithPrivateKey(
+          joinData['envelope'],
+          RSAHelper.parsePrivateKeyFromPEM(privateKey),
+        );
 
         if (mounted) {
           Navigator.push(
@@ -61,6 +63,9 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         }
+      } else {
+        var json = jsonDecode(response.body) as Map<String,dynamic>;
+        throw Exception("${json['error']}");
       }
     } catch (e, stackTrace) {
       log(e.toString(), stackTrace: stackTrace);
@@ -88,7 +93,9 @@ class _LoginScreenState extends State<LoginScreen> {
               controller: _serverIPController,
               decoration: const InputDecoration(labelText: 'IP do Servidor'),
             ),
-            const SizedBox(height: 16,),
+            const SizedBox(
+              height: 16,
+            ),
             TextField(
               controller: _nameController,
               decoration: const InputDecoration(labelText: 'Nome'),
