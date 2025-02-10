@@ -9,6 +9,7 @@ import 'package:leilao_app/core/helpers/environment_helper.dart';
 import 'dart:convert';
 
 import 'package:leilao_app/core/helpers/rsa_helper.dart';
+import 'package:leilao_app/main.dart';
 import 'package:leilao_app/services/encryption_service.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -32,39 +33,35 @@ class _LoginScreenState extends State<LoginScreen> {
       EnvironmentHelper.apiUrl = serverIp;
       var message = "join-auction";
       var privateKey = EnvironmentHelper.privateKey;
-      var signature = EncryptionService.signWithPrivateKey(message, privateKey);
+      var publicKey = EnvironmentHelper.publicKey;
+      var signature = EncryptionService.signWithPrivateKey(message, privateKey, publicKey);
       final response = await http.post(
         Uri.parse('$serverIp/join'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'user_id': _nameController.text,
           'signature': signature,
+          'message': message,
         }),
       );
 
       if (response.statusCode == 201) {
         final joinData = jsonDecode(response.body);
 
-        var decryptedSymmetricKey = EncryptionService.decryptWithPrivateKey(
-          joinData['envelope'],
-          RSAHelper.parsePrivateKeyFromPEM(privateKey),
-        );
+        var decryptedSymmetricKey = EncryptionService.decryptWithPrivateKey(joinData['envelope'], RSAHelper.parsePrivateKeyFromPEM(privateKey));
 
-        if (mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => AuctionScreen(
-                userName: _nameController.text,
-                multicastAddress: joinData['multicastAddress'],
-                multicastPort: joinData['multicastPort'],
-                symmetricKey: decryptedSymmetricKey,
-              ),
+        navigatorKey.currentState?.push(
+          MaterialPageRoute(
+            builder: (context) => AuctionScreen(
+              userName: _nameController.text,
+              multicastAddress: joinData['multicastAddress'],
+              multicastPort: joinData['multicastPort'],
+              symmetricKey: decryptedSymmetricKey,
             ),
-          );
-        }
+          ),
+        );
       } else {
-        var json = jsonDecode(response.body) as Map<String,dynamic>;
+        var json = jsonDecode(response.body) as Map<String, dynamic>;
         throw Exception("${json['error']}");
       }
     } catch (e, stackTrace) {

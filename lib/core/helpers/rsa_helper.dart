@@ -29,4 +29,29 @@ class RSAHelper {
       q.valueAsBigInteger,
     );
   }
+
+  /// Parse PEM string to RSAPublicKey
+  static RSAPublicKey parsePublicKeyFromPEM(String pemString) {
+    // Remove header, footer, and newlines
+    final pemContent = pemString.replaceAll('-----BEGIN PUBLIC KEY-----', '').replaceAll('-----END PUBLIC KEY-----', '').replaceAll('\n', '');
+
+    // Decode base64
+    final bytes = base64.decode(pemContent);
+
+    // Parse ASN1 sequence
+    final asn1Parser = ASN1Parser(bytes);
+    final topLevelSeq = asn1Parser.nextObject() as ASN1Sequence;
+
+    // Get the bit string
+    final bitString = topLevelSeq.elements[1] as ASN1BitString;
+
+    // Parse the bit string to get the actual public key sequence
+    final publicKeySeq = ASN1Parser(bitString.contentBytes()).nextObject() as ASN1Sequence;
+
+    // Get the elements we need
+    final modulus = publicKeySeq.elements[0] as ASN1Integer;
+    final exponent = publicKeySeq.elements[1] as ASN1Integer;
+
+    return RSAPublicKey(modulus.valueAsBigInteger, exponent.valueAsBigInteger);
+  }
 }
