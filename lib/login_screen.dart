@@ -31,7 +31,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // Registrar usuário
       final serverIp = _serverIPController.text;
       EnvironmentHelper.apiUrl = serverIp;
-      var message = "join-auction";
+      var message = "user_id:${_nameController.text}";
       var privateKey = EnvironmentHelper.privateKey;
       var publicKey = EnvironmentHelper.publicKey;
       var signature = EncryptionService.signWithPrivateKey(message, privateKey, publicKey);
